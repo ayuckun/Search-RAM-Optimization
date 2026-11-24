@@ -162,8 +162,8 @@ final class Links: NSObject, NSApplicationDelegate {
         // in the middle of it — a Safari export's passwords in the clear
         // among it — goes (Security).
         DispatchQueue.global(qos: .utility).async { ImportFile.sweepScratch() }
-        Trim.start()
         MainActor.assumeIsolated {
+            Trim.start()
             Shared.prefs.followFile()
             // The address field from any app, once asked for (Launcher.swift).
             Launcher.shared.start()

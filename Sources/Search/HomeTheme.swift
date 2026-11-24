@@ -254,15 +254,23 @@ enum HomeRender {
         let theme: HomeTheme, tuning: HomeTuning, width: Int, height: Int
         let dark: Bool, scale: CGFloat
     }
-    private static var made: [Key: NSImage] = [:]
+    private static let byteLimit = 64 * 1024 * 1024
+    private static var made: [Key: (image: NSImage, bytes: Int)] = [:]
     private static var order: [Key] = []
+    private static var cachedBytes = 0
+
+    static func discardCachedImages() {
+        made.removeAll()
+        order.removeAll()
+        cachedBytes = 0
+    }
 
     static func image(_ theme: HomeTheme, _ tuning: HomeTuning, size: CGSize,
                       dark: Bool, scale: CGFloat) -> NSImage? {
         guard size.width >= 1, size.height >= 1 else { return nil }
         let key = Key(theme: theme, tuning: tuning, width: Int(size.width), height: Int(size.height),
                       dark: dark, scale: scale)
-        if let image = made[key] { return image }
+        if let cached = made[key] { return cached.image }
         let ground = groundColour(dark: dark)
         let canvas = Canvas { context, size in
             HomeBackground.paint(theme, tuning, in: &context, size: size, dark: dark, ground: ground)
@@ -271,13 +279,16 @@ enum HomeRender {
         let renderer = ImageRenderer(content: canvas)
         renderer.scale = scale
         guard let cg = renderer.cgImage else { return nil }
-        // A full-window image is tens of megabytes at Retina scale, so only a
-        // handful are kept: the current one and the few a resize or a look
-        // change steps through. Older sizes and themes go first.
-        if made.count >= 4, let oldest = order.first { made[oldest] = nil; order.removeFirst() }
-        order.append(key)
         let image = NSImage(cgImage: cg, size: size)
-        made[key] = image
+        let bytes = cg.bytesPerRow * cg.height
+        // Keep the new image even if a large display needs the whole cache.
+        while let oldest = order.first, made.count >= 4 || cachedBytes + bytes > byteLimit {
+            if let removed = made.removeValue(forKey: oldest) { cachedBytes -= removed.bytes }
+            order.removeFirst()
+        }
+        order.append(key)
+        made[key] = (image, bytes)
+        cachedBytes += bytes
         return image
     }
 

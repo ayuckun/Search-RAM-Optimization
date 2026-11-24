@@ -725,6 +725,10 @@ struct SettingsPanel: View {
                     .foregroundStyle(Palette.muted)
             }
         case "tabs.sleep.dim": Switch(on: $prefs.dimsSleepingTabs)
+        case "memory.free":
+            Pill("Free Memory") { [weak browser] in
+                Trim.freeCacheMemory { browser?.announce("Memory caches cleared") }
+            }
         case "tabs.close.after":
             Picker("", selection: $prefs.tabLife) {
                 ForEach(TabLife.allCases) { life in

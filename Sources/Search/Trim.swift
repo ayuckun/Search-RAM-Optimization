@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import WebKit
 
 // Memory the app has finished with, handed back to the Mac.
 //
@@ -17,20 +18,56 @@ import Darwin
 // answered, see the shim's declarativeNetRequest), and when the app goes to
 // the background, the footprint is read — one kernel call — and when it has
 // grown by a good margin since the last look, malloc is asked to give back
-// what it is holding empty. Nothing runs on a timer. The work is a walk over
-// malloc's free lists, off the main thread.
+// what it is holding empty. App caches also go under system memory pressure.
+// The work is a walk over malloc's free lists, off the main thread.
 enum Trim {
     /// Growth worth a walk. Below this, what comes back isn't worth noticing.
     private static let margin: UInt64 = 64 << 20
     /// Read and written on `queue` only.
     nonisolated(unsafe) private static var after: UInt64 = 0
     private static let queue = DispatchQueue(label: "com.officecommun.search.trim", qos: .utility)
+    @MainActor private static var pressure: DispatchSourceMemoryPressure?
+    @MainActor private static var freeingCaches = false
 
-    /// Started once, at launch: the background is one moment to look.
+    @MainActor
     static func start() {
+        guard pressure == nil else { return }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: nil
         ) { _ in look() }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated {
+                HomeRender.discardCachedImages()
+                queue.async { lookNow(force: true) }
+            }
+        }
+        pressure = source
+        source.resume()
+    }
+
+    /// Settings › Tabs › Memory. WebKit also evicts cached Back and Forward
+    /// documents, so this is done on demand. The current views stay loaded.
+    @MainActor
+    @discardableResult
+    static func freeCacheMemory(then done: @escaping () -> Void) -> Bool {
+        guard !freeingCaches else { return false }
+        freeingCaches = true
+        HomeRender.discardCachedImages()
+        let stores = Set(Web.pages.allObjects.map { $0.configuration.websiteDataStore })
+        let cleared = DispatchGroup()
+        for store in stores {
+            cleared.enter()
+            store.removeData(ofTypes: [WKWebsiteDataTypeMemoryCache], modifiedSince: .distantPast) { cleared.leave() }
+        }
+        cleared.notify(queue: queue) {
+            lookNow(force: true)
+            DispatchQueue.main.async {
+                freeingCaches = false
+                done()
+            }
+        }
+        return true
     }
 
     /// An extension's rules were just built; what building them took can go.
@@ -41,8 +78,8 @@ enum Trim {
 
     private static func look() { queue.async { lookNow() } }
 
-    private static func lookNow() {
-        guard footprint() > after + margin else { return }
+    private static func lookNow(force: Bool = false) {
+        guard force || footprint() > after + margin else { return }
         malloc_zone_pressure_relief(nil, 0)
         after = footprint()
     }

@@ -12,6 +12,8 @@ Or with [Homebrew](https://brew.sh): `brew install --cask driceroland/tap/search
 
 ## RAM optimization in this fork
 
+To keep pages loaded, select **Never** under **Settings › Tabs › Memory › Sleep tabs you aren't using**. In the same section, use **Free Memory** to clear in-memory caches while your current pages stay open. Back and Forward may need to load a previous page again. Search also trims its own image cache and unused allocations under macOS memory pressure.
+
 Background tabs, including pins in the current space, release their WebKit pages after 30 minutes idle by default. Change the wait in **Settings › Tabs › Memory**. With automatic sleep on, Search also sleeps the oldest eligible pages when a window has more than eight loaded in the background. macOS memory pressure can trigger sleep sooner.
 
 Right-click a background tab and choose **Sleep Tab** to request sleep immediately. The tab keeps its pin, and selecting it restores its page, history, and scroll position. Visible pages, audible tabs, calls, picture-in-picture, downloads, unsent drafts, and sites set to **Keep This Site Awake** stay awake. Pins with permission to send notifications are exempt from automatic sleep.
