@@ -899,8 +899,7 @@ final class Tab: ObservableObject, Identifiable {
 
     private var watch: [NSKeyValueObservation] = []
 
-    /// A tab that has never been anywhere shows the address field instead of a
-    /// page. It still owns a web view — built now, warm by the time it's needed.
+    /// An empty tab shows the address field and needs no web view.
     var isBlank: Bool { address == nil && page == nil }
     /// A tab with a web page — loaded, on its way or asleep — as opposed to
     /// an empty one or one of Search's own pages.

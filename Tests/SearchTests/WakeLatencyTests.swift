@@ -86,6 +86,18 @@ final class WakeLatencyTests: XCTestCase {
         return tab
     }
 
+    func testBlankTabBuildsWebViewOnlyWhenItNavigates() async throws {
+        browser.frontBlank()
+        let tab = try XCTUnwrap(browser.active)
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertNil(tab.built)
+
+        tab.go(to: server.url("/first"))
+        spin(for: 5) { server.requests("/first") > 0 }
+        XCTAssertNotNil(tab.built)
+        XCTAssertGreaterThan(server.requests("/first"), 0)
+    }
+
     /// The load is asked for in the run loop's next turn after the view lands
     /// in a window. Waiting for a timer to look again, it was asked for at
     /// the timer's next tick, 20 ms after the wake, however soon the stage

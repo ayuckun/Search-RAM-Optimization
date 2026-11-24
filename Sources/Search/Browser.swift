@@ -3209,10 +3209,8 @@ final class Browser: NSObject, ObservableObject {
             }
             .store(in: &bag)
 
-        // Yesterday's tabs, or one empty one. Either way a web view is built
-        // now, which starts a content process while the window is still being
-        // drawn — so the first address you type navigates instead of waiting
-        // for WebKit to get up.
+        // Restore the pages that were on screen. An empty tab uses the
+        // native address field without creating a web view.
         defer {
             follow()
             if !isPopup { watchForSleep() }
@@ -3354,18 +3352,10 @@ final class Browser: NSObject, ObservableObject {
     /// front (a fresh start, see Session.startFresh) opens on one, beside its
     /// pins, rather than on the first of them.
     func frontBlank() {
-        // A blank tab costs nothing until it is asked for its page. Its
-        // web view — and with it WebKit's helper processes — is built a
-        // moment after the window is up, so that the first address typed
-        // finds everything already running, and the first frame never
-        // had to share the CPU with it.
+        // Keep the new window native until an address actually needs a page.
         let tab = Tab(configuration: Web.configuration(space: spaceID))
         adopt(tab)
         activeID = tab.id
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tab] in
-            guard let tab, tab.isBlank else { return }
-            _ = tab.web
-        }
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -9795,9 +9785,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// loads there still has the width it was shown at, and Docs would take
     /// that over nothing, and keep the quarter for as long as the page lives.
     func windowFrame(for webView: WKWebView) -> CGRect {
-        let shown: WKWebView? = webView.window != nil ? webView
-            : (active?.web.window != nil ? active?.web : nil)
-        guard let shown, let frame = shown.window?.frame else { return window?.frame ?? .zero }
+        let shown = webView.window != nil ? webView : active?.built ?? webView
+        guard let frame = shown.window?.frame else { return window?.frame ?? .zero }
         // The page's own width, at its own place across; the window's height
         // and place down, as the bars over a page are the browser's chrome.
         let page = shown.convert(shown.bounds, to: nil)

@@ -18,6 +18,20 @@ Background tabs, including pins in the current space, release their WebKit pages
 
 Right-click a background tab and choose **Sleep Tab** to request sleep immediately. The tab keeps its pin, and selecting it restores its page, history, and scroll position. Visible pages, audible tabs, calls, picture-in-picture, downloads, unsent drafts, and sites set to **Keep This Site Awake** stay awake. Pins with permission to send notifications are exempt from automatic sleep.
 
+Empty tabs at startup and in a new space use the native address field until the first navigation needs a web view.
+
+### Live-tab benchmark
+
+On macOS 27.3, the Search probe build and Helium 0.22.2.1 used fresh profiles and the same local fixtures, with automatic tab sleep and Memory Saver off. Figures are total physical footprint across each browser and its helper processes after 12 seconds of settling. Each pinned page retained its in-memory JavaScript marker.
+
+| Workload | Search | Helium |
+| --- | ---: | ---: |
+| One blank tab | 46.4 MiB | 379.5 MiB |
+| Six lightweight pins on distinct local sites | 181.5 MiB | 531.2 MiB |
+| Six heavy pins on distinct local sites | 904.5 MiB | 1,084.9 MiB |
+
+Each heavy page held about 100 MiB of live JavaScript arrays and drew a canvas.
+
 ## What it is
 
 Search is a browser with nothing in the way. A row of tabs — down the left, or across the top if you prefer — and the page. There is no toolbar, no start page, no sidebar of suggestions, no account to sign into, nothing that wants your attention. You type an address or a few words in one field and you are on the page.

@@ -1278,8 +1278,7 @@ struct ContentView: View {
         guard !browser.fieldShowing, browser.editingTab == nil else { return }
         DispatchQueue.main.async {
             guard !browser.fieldShowing, browser.editingTab == nil else { return }
-            // Search's own pages have no web view to hand the keys to.
-            guard browser.active?.page == nil, let web = browser.active?.web, let window = web.window else { return }
+            guard let web = browser.active?.built, let window = web.window else { return }
             if let responder = window.firstResponder as? NSView,
                responder === web || responder.isDescendant(of: web) { return }
             window.makeFirstResponder(web)

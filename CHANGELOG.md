@@ -33,6 +33,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
+- Empty tabs at startup and in a new space use the native address field until the first navigation needs a web view.
 - Idle pins now release their WebKit pages while keeping their place in the tab list. Automatic sleep targets at most eight eligible background pages per window and skips previews when freeing memory under pressure. Right-click a background tab and choose Sleep Tab to put it to sleep immediately.
 
 - A coding agent using Search shows as a card at the foot of the sidebar, drawn as "Update ready" is: its name ("Claude Code"), whole even in the narrowest sidebar, and a Stop button like Restart; with the tabs across the top, a pill like the update's. With an update waiting too, the two cards stack. The Stop that came up on the agent's tab under the pointer, over its title, is gone: the tab keeps its dot, and File › Stop Agent (⌃⌥⌘.) is unchanged.
