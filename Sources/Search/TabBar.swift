@@ -1880,11 +1880,9 @@ struct TabMenu: View {
         Button(muted ? "Unmute \(count) Tabs" : "Mute \(count) Tabs") {
             for each in picked where each.muted == muted { each.toggleMute() }
         }
-        Button("Put \(count) Tabs to Sleep") {
-            for each in picked where browser.awake(because: each) == nil { browser.sleep(each) }
-        }
-        .disabled(picked.allSatisfy { browser.awake(because: $0) != nil })
         Divider()
+        Button("Sleep \(count) Tabs") { browser.sleepManually(picked) }
+            .disabled(picked.allSatisfy { browser.awake(because: $0, manually: true) != nil })
         Button("Close \(count) Tabs") { browser.closePickedTabs() }
         Button("Close Other Tabs") { browser.closeOthers(but: picked) }
             .disabled(browser.tabs.count <= count)
@@ -2104,16 +2102,9 @@ struct TabMenu: View {
                 .disabled(!tab.isWeb || tab.shy)
         }
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
-        // Its page let go of now, as it would be after half an hour unseen:
-        // the row keeps its title and picture, and it loads again when gone
-        // to. Not the tab on screen, nor one that has to stay awake (#310).
-        Button("Put to Sleep") {
-            browser.sleep(tab) { outcome in
-                if outcome != "asleep" { browser.announce("Stays awake: \(outcome)") }
-            }
-        }
-        .disabled(browser.awake(because: tab) != nil)
         Divider()
+        Button("Sleep Tab") { browser.sleepManually([tab]) }
+            .disabled(browser.awake(because: tab, manually: true) != nil)
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }
             .disabled(browser.tabs.count < 2)

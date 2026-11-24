@@ -11,14 +11,10 @@ import WebKit
 // history, its scroll position, and a picture to show while the page is
 // rebuilt underneath (see Tab.sleep).
 //
-// Some tabs never sleep, because waking them couldn't give back what they
-// were doing: the one on screen, pinned tabs (those are put down by hand,
-// with ⌘W), a tab playing sound, on a call, sending a download, holding its
-// video out in the little window, or holding something typed and not sent.
-// A pin stays awake only in the space on screen: in a space you aren't in it
-// sleeps after the same wait as the tabs beside it, unless its site may send
-// notifications, which a page asleep couldn't (#569). Five spaces of five
-// pins was twenty-five pages that never let go.
+// The pages on screen and tabs playing sound, on a call, downloading, or
+// holding a draft stay awake. Pins follow the same idle rules as other
+// tabs, with an automatic exception for sites allowed to send notifications.
+// Sleep leaves a pin in place at its current address.
 //
 // With the last window closed and the app still running, there is nothing
 // on screen to wait for: the tabs the same rules let go sleep at once (see
@@ -32,8 +28,9 @@ import WebKit
 // runs no timers and wakes no processor. A Mac that is only hot keeps the pace
 // chosen. The look reads the wait each time, so it follows the switch at once.
 //
-// When macOS says memory is short, the wait shrinks, whatever was chosen: to
-// five minutes on a warning, to nothing when it is critical.
+// Each window tries to keep at most eight eligible background pages loaded.
+// When macOS says memory is short, the idle wait shrinks to at most five
+// minutes on a warning and to nothing when it is critical.
 
 /// How soon tabs sleep, as chosen in Settings. Three levels rather than
 /// numbers: what someone decides is how much a waking tab bothers them, not
@@ -78,6 +75,8 @@ enum SleepPace: String, CaseIterable, Identifiable {
 }
 
 extension Browser {
+    private static let backgroundPageLimit = 8
+
     /// How long a tab has to go without being looked at: the chosen pace's
     /// wait, no longer than Sooner's in Low Power Mode when the switch for it
     /// is on, or `sleep.after` in seconds, for the bench and the measurements.
@@ -106,60 +105,62 @@ extension Browser {
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let event = self.pressure?.data else { return }
-                self.sleepIdle(within: event.contains(.critical) ? 0 : 5 * 60)
+                self.sleepIdle(within: event.contains(.critical) ? 0 : min(Browser.sleepAfter, 5 * 60))
             }
         }
         source.resume()
         pressure = source
     }
 
-    /// Every tab that has gone long enough without being looked at, the one
-    /// left longest first.
+    /// Oldest pages first, including the other spaces. A pressure request can
+    /// replace a routine sweep after the current tab finishes.
     func sleepIdle(within given: TimeInterval? = nil) {
-        guard prefs.sleepsTabs else { return }
+        guard prefs.sleepsTabs, !retired else { return }
+        if sleepSweepRunning {
+            if let given { pendingSleepWait = min(pendingSleepWait ?? given, given) }
+            return
+        }
         let wait = given ?? Browser.sleepAfter
-        let now = Date()
-        // The rows of the other spaces too: parked is not the same as used.
-        let idle = (tabs + parkedTabs)
-            .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
+        let eligible = (tabs + parkedTabs)
+            .filter { awake(because: $0) == nil }
             .sorted { $0.touched < $1.touched }
-        // One after another, not all at once: each is pictured at the screen's
-        // pixels first, and under memory pressure every idle tab pictured
-        // together asked for most memory in the very moment there was least.
-        // A page that never answers holds up the rest for a moment at most.
-        var rest = idle[...]
+        var excess = max(0, eligible.count - Browser.backgroundPageLimit)
+        var rest = eligible.map { (tab: $0, touched: $0.touched) }[...]
+        sleepSweepRunning = true
         func next() {
-            guard let tab = rest.popFirst() else { return }
-            // Looked at since the list was made, while the ones before it
-            // slept: not idle any more.
-            guard Date().timeIntervalSince(tab.touched) >= wait else { return next() }
-            var moved = false
-            let onward = {
-                guard !moved else { return }
-                moved = true
-                next()
+            if let urgent = pendingSleepWait {
+                pendingSleepWait = nil
+                sleepSweepRunning = false
+                sleepIdle(within: urgent)
+                return
             }
-            sleep(tab) { _ in onward() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { onward() }
+            while prefs.sleepsTabs, !retired, let entry = rest.popFirst() {
+                let overLimit = excess > 0
+                guard entry.tab.touched == entry.touched,
+                      overLimit || Date().timeIntervalSince(entry.touched) >= wait else { continue }
+                // Skip the Retina snapshot when making room for other tabs.
+                sleep(entry.tab, preview: given == nil && !overLimit, automatic: true) { result in
+                    if overLimit, result == "asleep" { excess -= 1 }
+                    DispatchQueue.main.async { next() }
+                }
+                return
+            }
+            sleepSweepRunning = false
         }
         next()
     }
 
     /// The last window closed with the app running (Browsers.closing):
     /// nothing is on screen any more, so every tab the rules here let go
-    /// sleeps now rather than half an hour on, as Safari and Chrome close
-    /// theirs. The tabs stay, with their history, place and picture, for
+    /// sleeps now. The tabs stay, with their history and place, for
     /// the window that comes back (see `shut`). One playing sound, on a
     /// call, downloading, with its video out or holding something typed
     /// stays awake, as it would at any other time. A page still loading is
     /// looked at once more a little later.
     func sleepShut(again: Bool = true) {
         guard prefs.sleepsTabs, shut else { return }
-        var loading = false
-        for tab in tabs + parkedTabs {
-            if awake(because: tab) == "still loading" { loading = true }
-            sleep(tab)
-        }
+        let loading = (tabs + parkedTabs).contains { awake(because: $0) == "still loading" }
+        sleepIdle(within: 0)
         guard again, loading else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.sleepShut(again: false) }
     }
@@ -172,15 +173,15 @@ extension Browser {
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
     /// the caller's business; this is everything else.
-    func awake(because tab: Tab) -> String? {
+    func awake(because tab: Tab, manually: Bool = false) -> String? {
         // With the last window closed (`shut`) nothing is on screen.
         if !shut, visibleTabIDs.contains(tab.id) { return "on screen" }
-        if tab.pin != nil, let kept = pinKept(tab) { return kept }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }
         if tab.asleep { return "already asleep" }
-        guard tab.built != nil else { return "no page" }
-        if tab.loading { return "still loading" }
+        guard tab.address != nil, tab.built != nil else { return "no page" }
+        if tab.loading || tab.built?.isLoading == true { return "still loading" }
+        if !manually, tab.pin != nil, mayNotify(tab) { return "pinned, and its site may send notifications" }
         return busy(tab)
     }
 
@@ -196,14 +197,6 @@ extension Browser {
         } else {
             if on { prefs.awakeSites.insert(host) } else { prefs.awakeSites.remove(host) }
         }
-    }
-
-    /// Why a pin stays awake: always in the space on screen; in one you
-    /// aren't in, or with the last window closed, only while its site may
-    /// send notifications.
-    private func pinKept(_ tab: Tab) -> String? {
-        guard shut || parked.values.contains(where: { $0.tabs.contains { $0 === tab } }) else { return "pinned" }
-        return mayNotify(tab) ? "pinned, and its site may send notifications" : nil
     }
 
     /// Whether the site on the tab is allowed to send notifications (see
@@ -241,43 +234,83 @@ extension Browser {
         return nil
     }
 
-    /// Asks the page whether it holds anything typed, pictures it, then lets
-    /// it go — looking again at each step, since each takes a moment and you
-    /// may have gone back to the tab in the meantime.
-    func sleep(_ tab: Tab, done: ((String) -> Void)? = nil) {
-        if let reason = awake(because: tab) {
+    /// Sleep the chosen background tabs one at a time.
+    func sleepManually(_ tabs: [Tab]) {
+        let single = tabs.count == 1
+        var rest = tabs[...]
+        func next() {
+            guard let tab = rest.popFirst() else { return }
+            sleep(tab, manually: true, preview: single) { result in
+                if single {
+                    self.announce(result == "asleep" ? "Tab asleep" : "Stays awake: \(result)")
+                } else {
+                    DispatchQueue.main.async { next() }
+                }
+            }
+        }
+        next()
+    }
+
+    /// Check the page and its drafts again after each WebKit reply. A slow
+    /// page gets to stay awake while the sweep moves on to the next one.
+    func sleep(_ tab: Tab, manually: Bool = false, preview: Bool = true, automatic: Bool = false,
+               done: ((String) -> Void)? = nil) {
+        if let reason = awake(because: tab, manually: manually) {
             done?(reason)
             return
         }
-        let web = tab.built, document = tab.documentGeneration, touched = tab.touched
+        let id = tab.id
+        guard sleepingTabs.insert(id).inserted else { done?("already going to sleep"); return }
+        let web = tab.built.map(ObjectIdentifier.init), document = tab.documentGeneration, touched = tab.touched
+        var finished = false
+        var completion = done
+        let finish: (String) -> Void = { [weak self] result in
+            guard !finished else { return }
+            finished = true
+            self?.sleepingTabs.remove(id)
+            let callback = completion
+            completion = nil
+            callback?(result)
+        }
+        func check(_ browser: Browser, _ tab: Tab, typed: Bool = false) -> Bool {
+            guard !finished else { return false }
+            if browser.retired || !(browser.tabs.contains { $0 === tab } ||
+                browser.parked.values.contains { $0.tabs.contains { $0 === tab } }) {
+                finish("gone")
+            } else if automatic, !browser.prefs.sleepsTabs {
+                finish("automatic sleep is off")
+            } else if tab.built.map(ObjectIdentifier.init) != web || tab.documentGeneration != document ||
+                        tab.touched != touched {
+                finish("page changed")
+            } else if typed {
+                finish("holding something typed")
+            } else if let reason = browser.awake(because: tab, manually: manually) {
+                finish(reason)
+            }
+            return !finished
+        }
         tab.unsaved { [weak self, weak tab] typed in
-            guard let self, let tab else { done?("gone"); return }
-            if typed {
-                done?("holding something typed")
-                return
-            }
-            if let reason = self.awake(because: tab) {
-                done?(reason)
-                return
-            }
-            tab.snapshot { [weak self, weak tab] picture in
-                guard let self, let tab else { done?("gone"); return }
-                if let reason = self.awake(because: tab) { done?(reason); return }
-                KeptSession.capture(tab) { storage in
-                    // A draft may have appeared while WebKit took the picture or read storage.
-                    tab.unsaved { typed in
-                        if tab.built !== web || tab.documentGeneration != document || tab.touched != touched {
-                            done?("page changed")
-                            return
-                        }
-                        if typed { done?("holding something typed"); return }
-                        if let reason = self.awake(because: tab) { done?(reason); return }
-                        KeptSession.remember(storage, for: tab, in: self)
-                        tab.sleep(picture: picture)
-                        done?("asleep")
+            guard let self, let tab else { finish("gone"); return }
+            guard check(self, tab, typed: typed) else { return }
+            let save: (Data?) -> Void = { [weak self, weak tab] picture in
+                guard let self, let tab else { finish("gone"); return }
+                guard check(self, tab) else { return }
+                KeptSession.capture(tab) { [weak self, weak tab] storage in
+                    guard let self, let tab else { finish("gone"); return }
+                    guard check(self, tab) else { return }
+                    // A draft may have appeared while WebKit pictured the page or read storage.
+                    tab.unsaved { [weak self, weak tab] typed in
+                        guard let self, let tab else { finish("gone"); return }
+                        guard check(self, tab, typed: typed) else { return }
+                        tab.sleep(picture: picture, session: storage)
+                        finish("asleep")
                     }
                 }
             }
+            if preview { tab.snapshot(save) } else { save(nil) }
+        }
+        if !finished {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish("the page did not respond") }
         }
     }
 }
@@ -301,9 +334,6 @@ extension Browser {
 // functions used, and storage is the same in every world.
 @MainActor
 enum KeptSession {
-    /// What each sleeping tab's page had: `[origin, [[key, value], …]]` as JSON.
-    private static var kept: [UUID: String] = [:]
-
     /// Past this, a page's storage isn't kept: about half a megabyte.
     static let cap = 512 * 1024
 
@@ -313,7 +343,13 @@ enum KeptSession {
             const s = sessionStorage;
             if (!s.length) return null;
             const items = [];
-            for (let i = 0; i < s.length; i++) { const k = s.key(i); items.push([k, s.getItem(k)]); }
+            let length = 0;
+            for (let i = 0; i < s.length; i++) {
+              const k = s.key(i), v = s.getItem(k);
+              length += k.length + v.length;
+              if (length > \(cap)) return null;
+              items.push([k, v]);
+            }
             return JSON.stringify([location.origin, items]);
           } catch (e) { return null; }
         })()
@@ -328,17 +364,10 @@ enum KeptSession {
         }
     }
 
-    /// Publish the captured state only if the tab actually goes to sleep.
-    static func remember(_ storage: String?, for tab: Tab, in browser: Browser) {
-        let open = Set((browser.tabs + browser.parkedTabs).map(\.id))
-        kept = kept.filter { open.contains($0.key) }
-        kept[tab.id] = storage
-    }
-
     /// For the woken tab's next document (Tab.arm), ahead of its scripts:
     /// only for the same origin, and only into a session that's still empty.
     static func script(for tab: Tab) -> String? {
-        guard let json = kept[tab.id] else { return nil }
+        guard let json = tab.sleepingSession else { return nil }
         return """
             (() => {
               try {
@@ -354,8 +383,8 @@ enum KeptSession {
     /// answer says the tab should arm again without it. A blank page on the
     /// way there doesn't count.
     static func committed(_ tab: Tab) -> Bool {
-        guard kept[tab.id] != nil, let url = tab.built?.url, url.absoluteString != "about:blank" else { return false }
-        kept[tab.id] = nil
+        guard tab.sleepingSession != nil, let url = tab.built?.url, url.absoluteString != "about:blank" else { return false }
+        tab.sleepingSession = nil
         return true
     }
 }

@@ -10,6 +10,12 @@ Or with [Homebrew](https://brew.sh): `brew install --cask driceroland/tap/search
 
 ---
 
+## RAM optimization in this fork
+
+Background tabs, including pins in the current space, release their WebKit pages after 30 minutes idle by default. Change the wait in **Settings › Tabs › Memory**. With automatic sleep on, Search also sleeps the oldest eligible pages when a window has more than eight loaded in the background. macOS memory pressure can trigger sleep sooner.
+
+Right-click a background tab and choose **Sleep Tab** to request sleep immediately. The tab keeps its pin, and selecting it restores its page, history, and scroll position. Visible pages, audible tabs, calls, picture-in-picture, downloads, unsent drafts, and sites set to **Keep This Site Awake** stay awake. Pins with permission to send notifications are exempt from automatic sleep.
+
 ## What it is
 
 Search is a browser with nothing in the way. A row of tabs — down the left, or across the top if you prefer — and the page. There is no toolbar, no start page, no sidebar of suggestions, no account to sign into, nothing that wants your attention. You type an address or a few words in one field and you are on the page.

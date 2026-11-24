@@ -2899,6 +2899,9 @@ final class Browser: NSObject, ObservableObject {
     /// macOS saying memory is short. See Sleep.swift.
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
+    var sleepSweepRunning = false
+    var pendingSleepWait: TimeInterval?
+    var sleepingTabs: Set<Tab.ID> = []
     /// Downloads still under way. See `keep(_:)`.
     var downloading: [WKDownload] = []
     /// alert(), confirm() and prompt() from tabs that weren't in front,

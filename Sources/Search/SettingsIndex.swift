@@ -370,7 +370,7 @@ enum SettingsIndex {
               keys: ["tabs.popupWindows"], words: ["popup", "pop-up", "window"]),
         .init(id: "tabs.sleep", group: "memory", icon: "moon.zzz",
               title: "Sleep tabs you aren't using", detail: "A resting tab lets its page go and comes back where you left it",
-              more: "Pinned tabs, sound, calls and anything typed stay awake. Right-click a site's card to keep it awake.",
+              more: "Idle pinned tabs can sleep too. With automatic sleep on, Search also sleeps older background tabs when more than eight eligible pages are loaded in a window. Right-click a background tab and choose Sleep Tab to release its page now. Use Keep This Site Awake in the site card for sites that need to run in the background.",
               keys: ["tabs.sleep", SleepPace.key], words: ["memory", "discard", "suspend", "ram"], kind: .wide),
         .init(id: "tabs.sleep.dim", group: "memory", icon: "moon",
               title: "Dim sleeping tabs", detail: "A resting tab's title and icon fade until you go to it",
@@ -892,7 +892,7 @@ enum SleepChoice: String, CaseIterable, Identifiable {
     var title: String { self == .never ? "Never" : pace!.title }
     var pace: SleepPace? { SleepPace(rawValue: rawValue) }
     var detail: String {
-        guard let pace else { return "Every tab keeps its page, however long you leave it." }
+        guard let pace else { return "Automatic sleep is off. Right-click a background tab and choose Sleep Tab to release its page." }
         return pace.detail.replacingOccurrences(of: ".", with: "") + ", a tab rests and wakes when you go back to it."
     }
 }

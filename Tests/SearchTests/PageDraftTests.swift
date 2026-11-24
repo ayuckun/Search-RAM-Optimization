@@ -15,7 +15,9 @@ final class PageDraftTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         let tab = Tab(configuration: configuration)
-        defer { tab.close(); browser.closeAll() }
+        browser.prepare(tab)
+        browser.insert(tab, at: browser.tabs.count)
+        defer { browser.closeAll() }
         let web = tab.web
         let url = try XCTUnwrap(URL(string: "https://draft.example/"))
         tab.setAddressOptimistically(url)
@@ -84,5 +86,7 @@ final class PageDraftTests: XCTestCase {
         XCTAssertEqual(afterDraft, "asleep")
         XCTAssertNil(tab.built)
         XCTAssertTrue(try XCTUnwrap(KeptSession.script(for: tab)).contains("review"))
+        browser.close(tab)
+        XCTAssertNil(KeptSession.script(for: tab))
     }
 }

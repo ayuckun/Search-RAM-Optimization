@@ -877,6 +877,8 @@ final class Tab: ObservableObject, Identifiable {
     /// — the back list, the page, where it was scrolled to — handed to the
     /// view built to wake it, so it opens exactly where this one was left.
     private var memory: Any?
+    // The top-level page's sessionStorage, held until wake commits.
+    var sleepingSession: String?
 
     /// The same, for a tab about to close: what ⇧⌘T hands back, so the tab
     /// comes back with Back and Forward and its place on the page, not as
@@ -936,6 +938,7 @@ final class Tab: ObservableObject, Identifiable {
             held = nil
             pending = nil
             memory = nil
+            sleepingSession = nil
             picture = nil
             cover = nil
             failure = nil
@@ -1315,9 +1318,9 @@ final class Tab: ObservableObject, Identifiable {
         if let style = SiteStyles.shared.css(on: SiteStyles.host(of: url ?? pageAddress)) {
             add(SiteStyles.script(style), .atDocumentStart, mainFrameOnly: true, in: Web.world)
         }
-        // A woken page's sessionStorage, back before its scripts (KeptSession).
+        // The restored session belongs to this document only. Keep its script out of Armed's cache.
         if let kept = KeptSession.script(for: self) {
-            add(kept, .atDocumentStart, mainFrameOnly: true, in: Web.world)
+            scripts.append(WKUserScript(source: kept, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world))
         }
         // Only while a developer tools package has a tool open on this tab
         // (DevToolsPackages.swift).
@@ -1629,6 +1632,7 @@ final class Tab: ObservableObject, Identifiable {
         // nothing of where it was before to bring back.
         pending = nil
         memory = nil
+        sleepingSession = nil
         picture = nil
         cover = nil
         adoptIcon()
@@ -1653,6 +1657,10 @@ final class Tab: ObservableObject, Identifiable {
             show(own)
             return
         }
+        if address != url {
+            sleepingSession = nil
+            picture = nil
+        }
         address = url
         self.title = title
         self.name = name
@@ -1669,8 +1677,7 @@ final class Tab: ObservableObject, Identifiable {
         return Browser.samePage(home, address)
     }
 
-    /// True for a tab that has a place and an address but is holding no page —
-    /// brought back from the last session, or put down with ⌘W while pinned.
+    /// True for a tab that has an address and no live page.
     var asleep: Bool { pending != nil }
 
     /// ⌘W on a pinned tab. The letter keeps its place in the row and the
@@ -1692,6 +1699,7 @@ final class Tab: ObservableObject, Identifiable {
         }
         pending = url
         memory = nil
+        sleepingSession = nil
         picture = nil
         reading = 0
         stale = false
@@ -1712,9 +1720,10 @@ final class Tab: ObservableObject, Identifiable {
     /// view built to wake it opens the same page, at the same place, with
     /// Back still going back. What was typed and not sent is the one thing
     /// that can't come back, which is why the browser asks `unsaved` first.
-    func sleep(picture: Data?) {
+    func sleep(picture: Data?, session: String? = nil) {
         guard let url = address, let built else { return }
         memory = built.interactionState
+        sleepingSession = session
         self.picture = picture
         pending = url
         stale = false
@@ -1727,10 +1736,11 @@ final class Tab: ObservableObject, Identifiable {
     /// and build the view again with the destination's store.
     func rehome(in space: UUID) {
         guard !shy, !bench, store !== Spaces.store(for: space) else { return }
+        sleepingSession = nil
+        picture = nil
         if let built {
             memory = built.isLoading ? nil : built.interactionState
             pending = address ?? built.url
-            picture = nil
             cover = nil
             discard()
         }
@@ -1765,7 +1775,8 @@ final class Tab: ObservableObject, Identifiable {
             }
             let scale = CGFloat(cg.width) / image.size.width
             DispatchQueue.global(qos: .utility).async {
-                let data = Tab.jpeg(cg, scale: scale)
+                // A large screenshot can use more memory than the wake preview is worth.
+                let data = Tab.jpeg(cg, scale: scale).flatMap { $0.count <= 512 * 1024 ? $0 : nil }
                 DispatchQueue.main.async { done(data) }
             }
         }
@@ -2167,6 +2178,7 @@ final class Tab: ObservableObject, Identifiable {
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
     func close() {
+        sleepingSession = nil
         onZoom = nil
         onLink = nil
         onPick = nil
