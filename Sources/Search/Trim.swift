@@ -18,8 +18,9 @@ import WebKit
 // answered, see the shim's declarativeNetRequest), and when the app goes to
 // the background, the footprint is read — one kernel call — and when it has
 // grown by a good margin since the last look, malloc is asked to give back
-// what it is holding empty. App caches also go under system memory pressure.
-// The work is a walk over malloc's free lists, off the main thread.
+// what it is holding empty. System memory pressure also clears caches while
+// the current pages stay loaded. The walk over malloc's free lists runs off
+// the main thread.
 enum Trim {
     /// Growth worth a walk. Below this, what comes back isn't worth noticing.
     private static let margin: UInt64 = 64 << 20
@@ -28,6 +29,7 @@ enum Trim {
     private static let queue = DispatchQueue(label: "com.officecommun.search.trim", qos: .utility)
     @MainActor private static var pressure: DispatchSourceMemoryPressure?
     @MainActor private static var freeingCaches = false
+    @MainActor private static var lastWebCacheClear: ContinuousClock.Instant?
 
     @MainActor
     static func start() {
@@ -37,17 +39,26 @@ enum Trim {
         ) { _ in look() }
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler {
-            MainActor.assumeIsolated {
-                HomeRender.discardCachedImages()
-                queue.async { lookNow(force: true) }
-            }
+            MainActor.assumeIsolated { _ = handleMemoryPressure() }
         }
         pressure = source
         source.resume()
     }
 
-    /// Settings › Tabs › Memory. WebKit also evicts cached Back and Forward
-    /// documents, so this is done on demand. The current views stay loaded.
+    /// WebKit also evicts cached Back and Forward documents. Rate-limit
+    /// automatic clears when macOS sends several pressure events in a row.
+    @MainActor
+    @discardableResult
+    static func handleMemoryPressure(then done: @escaping () -> Void = {}) -> Bool {
+        let recentlyCleared = lastWebCacheClear.map { $0.duration(to: .now) < .seconds(60) } ?? false
+        if !recentlyCleared, Web.pages.count > 0, freeCacheMemory(then: done) { return true }
+        HomeRender.discardCachedImages()
+        queue.async { lookNow(force: true) }
+        return false
+    }
+
+    /// Clear cached resources in the existing WebKit stores and keep their
+    /// current documents loaded.
     @MainActor
     @discardableResult
     static func freeCacheMemory(then done: @escaping () -> Void) -> Bool {
@@ -55,6 +66,7 @@ enum Trim {
         freeingCaches = true
         HomeRender.discardCachedImages()
         let stores = Set(Web.pages.allObjects.map { $0.configuration.websiteDataStore })
+        if !stores.isEmpty { lastWebCacheClear = .now }
         let cleared = DispatchGroup()
         for store in stores {
             cleared.enter()

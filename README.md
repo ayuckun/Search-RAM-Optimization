@@ -12,7 +12,7 @@ Or with [Homebrew](https://brew.sh): `brew install --cask driceroland/tap/search
 
 ## RAM optimization in this fork
 
-To keep pages loaded, select **Never** under **Settings › Tabs › Memory › Sleep tabs you aren't using**. In the same section, use **Free Memory** to clear in-memory caches while your current pages stay open. Back and Forward may need to load a previous page again. Search also trims its own image cache and unused allocations under macOS memory pressure.
+To keep pages loaded, select **Never** under **Settings › Tabs › Memory › Sleep tabs you aren't using**. When macOS reports memory pressure, Search automatically releases in-memory caches and unused allocations while your current pages stay open. **Free Memory** in the same section clears caches on demand. Back and Forward may need to load a previous page again.
 
 Background tabs, including pins in the current space, release their WebKit pages after 30 minutes idle by default. Change the wait in **Settings › Tabs › Memory**. With automatic sleep on, Search also sleeps the oldest eligible pages when a window has more than eight loaded in the background. macOS memory pressure can trigger sleep sooner.
 

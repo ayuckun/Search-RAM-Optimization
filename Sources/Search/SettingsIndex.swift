@@ -377,7 +377,7 @@ enum SettingsIndex {
               keys: ["tabs.sleep.dim"], words: ["sleep", "dim", "fade", "inactive", "suspend"]),
         .init(id: "memory.free", group: "memory", icon: "memorychip",
               title: "Free cache memory", detail: "Release cached resources and keep your current pages loaded",
-              more: "This clears Search's cached images and WebKit's in-memory cache. Back and Forward may need to load a previous page again. Cookies, sign-ins, and offline site data stay.",
+              more: "Search clears these caches automatically when macOS reports memory pressure, even with tab sleep set to Never. Back and Forward may load a previous page again. Cookies, sign-ins, and offline site data stay.",
               words: ["ram", "trim", "memory", "cache", "keep tabs awake"]),
         .init(id: "tabs.close.after", group: "memory", icon: "timer",
               title: "Close tabs you leave alone", detail: "Pinned, named and grouped tabs stay. ⇧⌘T brings one back",
